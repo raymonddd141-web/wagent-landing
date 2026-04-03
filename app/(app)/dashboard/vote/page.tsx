@@ -91,7 +91,7 @@ export default function VotePage() {
 
       // Load my votes
       const { data: mine } = await supabase.from('feature_votes').select('feature_id').eq('business_id', biz.id)
-      setMyVotes(new Set(mine?.map(v => v.feature_id) || []))
+      setMyVotes(new Set(Array.from(mine?.map(v => v.feature_id) || [])))
       setLoading(false)
     }
     init()
