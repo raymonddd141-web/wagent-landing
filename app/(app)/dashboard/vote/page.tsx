@@ -108,7 +108,7 @@ export default function VotePage() {
       setVotes(prev => ({ ...prev, [featureId]: Math.max((prev[featureId] || 1) - 1, 0) }))
     } else {
       await supabase.from('feature_votes').insert({ business_id: businessId, feature_id: featureId })
-      setMyVotes(prev => new Set([...prev, featureId]))
+      setMyVotes(prev => { const n = new Set(prev); n.add(featureId); return n })
       setVotes(prev => ({ ...prev, [featureId]: (prev[featureId] || 0) + 1 }))
     }
     setVoting(null)
