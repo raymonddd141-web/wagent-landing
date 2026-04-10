@@ -87,6 +87,50 @@ export function verifyWebhookSignature(
   return `sha256=${expectedSignature}` === signature
 }
 
+// Download media (voice notes, images) from WhatsApp
+export async function downloadMedia(
+  mediaId: string,
+  accessToken: string
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  // Step 1: Get the media URL
+  const metaRes = await axios.get(`${WA_BASE}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  const mediaUrl = metaRes.data.url
+  const mimeType = metaRes.data.mime_type || 'audio/ogg'
+
+  // Step 2: Download the actual file
+  const fileRes = await axios.get(mediaUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    responseType: 'arraybuffer',
+  })
+
+  return { buffer: Buffer.from(fileRes.data), mimeType }
+}
+
+// Transcribe audio using OpenAI Whisper API (or fall back to a placeholder)
+export async function transcribeAudio(
+  audioBuffer: Buffer,
+  mimeType: string
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) return '[Voice message received]'
+
+  const FormData = (await import('form-data')).default
+  const form = new FormData()
+  const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'ogg'
+  form.append('file', audioBuffer, { filename: `audio.${ext}`, contentType: mimeType })
+  form.append('model', 'whisper-1')
+
+  const res = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      ...form.getHeaders(),
+    },
+  })
+  return res.data.text || '[Voice message received]'
+}
+
 export interface WhatsAppMessage {
   from: string
   id: string

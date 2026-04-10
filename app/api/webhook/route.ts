@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { extractMessageFromWebhook, sendTextMessage, sendAudioMessage, markMessageRead } from '@/lib/whatsapp'
+import { extractMessageFromWebhook, sendTextMessage, sendAudioMessage, markMessageRead, downloadMedia, transcribeAudio } from '@/lib/whatsapp'
 import { generateReply } from '@/lib/claude'
 import { textToSpeech } from '@/lib/elevenlabs'
 
@@ -72,13 +72,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true })
     }
 
-    // Only handle text messages for now
-    if (message.type !== 'text' || !message.text?.body) {
+    // Handle text and audio messages
+    if (message.type !== 'text' && message.type !== 'audio') {
       return NextResponse.json({ success: true })
     }
 
     const customerPhone = message.from
-    const customerText = message.text.body
+    let customerText = ''
+    let audioBuffer: Buffer | null = null
+    let audioMimeType = 'audio/ogg'
+
+    if (message.type === 'text' && message.text?.body) {
+      customerText = message.text.body
+    } else if (message.type === 'audio' && message.audio?.id) {
+      // Download voice note once — reuse for transcription + storage
+      try {
+        const media = await downloadMedia(message.audio.id, business.whatsapp_access_token)
+        audioBuffer = media.buffer
+        audioMimeType = media.mimeType
+        customerText = await transcribeAudio(audioBuffer, audioMimeType)
+      } catch (e) {
+        console.error('Voice note transcription error:', e)
+        customerText = '[Voice message received]'
+      }
+    }
+
+    if (!customerText) {
+      return NextResponse.json({ success: true })
+    }
 
     // Mark as read
     await markMessageRead(phoneNumberId, business.whatsapp_access_token, message.id)
@@ -99,7 +120,7 @@ export async function POST(request: NextRequest) {
           customer_phone: customerPhone,
           customer_name: contactName || undefined,
           status: 'ai_active',
-          last_message: customerText,
+          last_message: message.type === 'audio' ? '🎤 Voice message' : customerText,
           last_message_at: new Date().toISOString(),
         })
         .select()
@@ -107,7 +128,7 @@ export async function POST(request: NextRequest) {
       conversation = newConv
     } else {
       await supabase.from('conversations').update({
-        last_message: customerText,
+        last_message: message.type === 'audio' ? '🎤 Voice message' : customerText,
         last_message_at: new Date().toISOString(),
         unread_count: (conversation.unread_count || 0) + 1,
         ...(contactName ? { customer_name: contactName } : {}),
@@ -116,13 +137,27 @@ export async function POST(request: NextRequest) {
 
     if (!conversation) return NextResponse.json({ success: true })
 
-    // Save customer message
+    // Save customer voice note to storage
+    let customerAudioUrl: string | null = null
+    if (message.type === 'audio' && audioBuffer) {
+      try {
+        const ext = audioMimeType.includes('ogg') ? 'ogg' : 'mp4'
+        const filename = `voice/${business.id}/customer_${Date.now()}.${ext}`
+        await supabase.storage.from('voice-messages').upload(filename, audioBuffer, { contentType: audioMimeType })
+        const { data: { publicUrl } } = supabase.storage.from('voice-messages').getPublicUrl(filename)
+        customerAudioUrl = publicUrl
+      } catch (e) {
+        console.error('Error saving customer audio:', e)
+      }
+    }
+
     await supabase.from('messages').insert({
       conversation_id: conversation.id,
       business_id: business.id,
       from_role: 'customer',
-      message_type: 'text',
+      message_type: message.type === 'audio' ? 'audio' : 'text',
       content: customerText,
+      audio_url: customerAudioUrl,
       whatsapp_message_id: message.id,
     })
 
