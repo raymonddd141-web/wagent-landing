@@ -336,7 +336,7 @@ export default function ChatsPage() {
             <div className="flex-1 min-w-0">
               <div className="text-[#e9edef] text-[16px] truncate">{displayName(activeConv)}</div>
               <div className="text-[#8696a0] text-[13px]">
-                {activeConv.status === 'blocked' ? 'Blocked' : activeConv.status === 'ai_active' ? 'AI handling' : activeConv.status === 'manual' ? 'Manual mode' : activeConv.status === 'resolved' ? 'Resolved' : 'Active'}
+                +{activeConv.customer_phone} · {activeConv.status === 'blocked' ? 'Blocked' : activeConv.status === 'ai_active' ? 'AI handling' : activeConv.status === 'manual' ? 'Manual mode' : activeConv.status === 'resolved' ? 'Resolved' : 'Active'}
               </div>
             </div>
             <div className="flex items-center gap-5 text-[#aebac1]">
@@ -464,6 +464,7 @@ export default function ChatsPage() {
                 <form onSubmit={sendReply} className="flex-1 flex items-center gap-2">
                   <input
                     value={reply} onChange={e => setReply(e.target.value)} placeholder="Type a message"
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && reply.trim()) { e.preventDefault(); sendReply(e as any) } }}
                     className="flex-1 bg-[#2a3942] text-[#e9edef] placeholder-[#8696a0] rounded-lg px-3 py-2.5 text-[15px] outline-none"
                   />
                   {reply.trim() ? (
