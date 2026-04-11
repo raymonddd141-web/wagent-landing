@@ -181,6 +181,8 @@ export interface WhatsAppMessage {
   text?: { body: string }
   audio?: { id: string; mime_type: string }
   image?: { id: string; mime_type: string; caption?: string }
+  document?: { id: string; mime_type: string; filename?: string; caption?: string }
+  video?: { id: string; mime_type: string; caption?: string }
 }
 
 export function extractMessageFromWebhook(body: any): {
