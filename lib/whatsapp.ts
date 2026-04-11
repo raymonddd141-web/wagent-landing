@@ -74,6 +74,48 @@ export async function markMessageRead(
   )
 }
 
+export async function sendImageMessage(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  imageUrl: string,
+  caption?: string
+) {
+  const response = await axios.post(
+    `${WA_BASE}/${phoneNumberId}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'image',
+      image: { link: imageUrl, ...(caption ? { caption } : {}) },
+    },
+    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
+  )
+  return response.data
+}
+
+export async function sendDocumentMessage(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  documentUrl: string,
+  filename: string
+) {
+  const response = await axios.post(
+    `${WA_BASE}/${phoneNumberId}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'document',
+      document: { link: documentUrl, filename },
+    },
+    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
+  )
+  return response.data
+}
+
 export function verifyWebhookSignature(
   payload: string,
   signature: string,
