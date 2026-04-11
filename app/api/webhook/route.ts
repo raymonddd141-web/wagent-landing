@@ -78,6 +78,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true })
     }
 
+    // Deduplicate — skip if we already processed this WhatsApp message
+    const { data: existingMsg } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('whatsapp_message_id', message.id)
+      .limit(1)
+      .single()
+
+    if (existingMsg) {
+      return NextResponse.json({ success: true })
+    }
+
     const customerPhone = message.from
     let customerText = ''
     let mediaBuffer: Buffer | null = null
@@ -215,58 +227,64 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate AI reply
-    const aiText = await generateReply(customerText, chatHistory, {
-      businessName: business.name,
-      customInstructions: business.custom_instructions,
-      faqs: faqsData || [],
-      trainingDocs: (docsData || []).map(d => d.content_text).filter(Boolean),
-      handoffEnabled: business.handoff_enabled,
-      handoffNumber: business.handoff_whatsapp_number || undefined,
-    })
+    try {
+      console.log(`Generating reply for conversation ${conversation.id}, history: ${chatHistory.length} messages`)
+      const aiText = await generateReply(customerText, chatHistory, {
+        businessName: business.name,
+        customInstructions: business.custom_instructions,
+        faqs: faqsData || [],
+        trainingDocs: (docsData || []).map(d => d.content_text).filter(Boolean),
+        handoffEnabled: business.handoff_enabled,
+        handoffNumber: business.handoff_whatsapp_number || undefined,
+      })
+      console.log(`AI reply generated: "${aiText.slice(0, 80)}..."`)
 
-    // Decide: voice or text reply?
-    const useVoice = business.voice_enabled && Math.random() < 0.3
-    let replyAudioUrl: string | null = null
-    let replyType: 'text' | 'audio' = 'text'
+      // Decide: voice or text reply?
+      const useVoice = business.voice_enabled && Math.random() < 0.3
+      let replyAudioUrl: string | null = null
+      let replyType: 'text' | 'audio' = 'text'
 
-    if (useVoice && business.elevenlabs_api_key) {
-      try {
-        const voiceBuffer = await textToSpeech(aiText, undefined, business.elevenlabs_api_key)
-        const filename = `voice/${business.id}/${Date.now()}.mp3`
-        const { data: upload } = await supabase.storage.from('chat-media').upload(filename, voiceBuffer, { contentType: 'audio/mpeg' })
-        if (upload) {
-          const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(filename)
-          replyAudioUrl = publicUrl
-          replyType = 'audio'
+      if (useVoice && business.elevenlabs_api_key) {
+        try {
+          const voiceBuffer = await textToSpeech(aiText, undefined, business.elevenlabs_api_key)
+          const filename = `voice/${business.id}/${Date.now()}.mp3`
+          const { data: upload } = await supabase.storage.from('chat-media').upload(filename, voiceBuffer, { contentType: 'audio/mpeg' })
+          if (upload) {
+            const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(filename)
+            replyAudioUrl = publicUrl
+            replyType = 'audio'
+          }
+        } catch (e) {
+          console.error('Voice reply error, falling back to text:', e)
         }
-      } catch (e) {
-        // Fall back to text
       }
+
+      // Send to WhatsApp
+      if (replyType === 'audio' && replyAudioUrl) {
+        await sendAudioMessage(phoneNumberId, business.whatsapp_access_token, customerPhone, replyAudioUrl)
+      } else {
+        await sendTextMessage(phoneNumberId, business.whatsapp_access_token, customerPhone, aiText)
+      }
+
+      // Save AI message
+      await supabase.from('messages').insert({
+        conversation_id: conversation.id,
+        business_id: business.id,
+        from_role: 'ai',
+        message_type: replyType,
+        content: aiText,
+        audio_url: replyAudioUrl,
+        status: 'sent',
+      })
+
+      await supabase.from('conversations').update({
+        last_message: aiText,
+        last_message_at: new Date().toISOString(),
+        unread_count: 0,
+      }).eq('id', conversation.id)
+    } catch (replyError) {
+      console.error('AI reply generation/sending failed:', replyError)
     }
-
-    // Send to WhatsApp
-    if (replyType === 'audio' && replyAudioUrl) {
-      await sendAudioMessage(phoneNumberId, business.whatsapp_access_token, customerPhone, replyAudioUrl)
-    } else {
-      await sendTextMessage(phoneNumberId, business.whatsapp_access_token, customerPhone, aiText)
-    }
-
-    // Save AI message
-    await supabase.from('messages').insert({
-      conversation_id: conversation.id,
-      business_id: business.id,
-      from_role: 'ai',
-      message_type: replyType,
-      content: aiText,
-      audio_url: replyAudioUrl,
-      status: 'sent',
-    })
-
-    await supabase.from('conversations').update({
-      last_message: aiText,
-      last_message_at: new Date().toISOString(),
-      unread_count: 0,
-    }).eq('id', conversation.id)
 
     return NextResponse.json({ success: true })
   } catch (error) {
