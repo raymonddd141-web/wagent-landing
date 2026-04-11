@@ -13,24 +13,45 @@ export interface BusinessContext {
 }
 
 export async function generateReply(
-  _customerMessage: string,
+  customerMessage: string,
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
   context: BusinessContext
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(context)
 
-  // conversationHistory already includes the latest customer message from the DB
-  const messages = conversationHistory.slice(-20)
+  // Merge consecutive same-role messages (e.g. customer sends "Hi" 5 times)
+  // Claude API requires alternating user/assistant roles
+  const raw = conversationHistory.slice(-20)
+  const merged: Array<{ role: 'user' | 'assistant'; content: string }> = []
+  for (const msg of raw) {
+    if (!msg.content) continue
+    const last = merged[merged.length - 1]
+    if (last && last.role === msg.role) {
+      last.content += '\n' + msg.content
+    } else {
+      merged.push({ role: msg.role, content: msg.content })
+    }
+  }
+
+  // Ensure the conversation ends with a user message
+  if (merged.length === 0 || merged[merged.length - 1].role !== 'user') {
+    merged.push({ role: 'user', content: customerMessage })
+  }
+
+  // Ensure the conversation starts with a user message
+  if (merged[0]?.role === 'assistant') {
+    merged.shift()
+  }
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 120,
     system: systemPrompt,
-    messages,
+    messages: merged,
   })
 
   const block = response.content[0]
-  return block.type === 'text' ? block.text : 'How may I further assist you?'
+  return block.type === 'text' ? block.text : 'How can I help you?'
 }
 
 function buildSystemPrompt(context: BusinessContext): string {
