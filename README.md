@@ -1,7 +1,7 @@
 # WAgenT — WhatsApp AI SaaS Platform
 
 A full multi-tenant SaaS platform connecting businesses 
-to an AI agent via WhatsApp Business API.
+to an AI agent(Assistant) via WhatsApp Business API.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=flat&logo=react&logoColor=61DAFB)
